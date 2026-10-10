@@ -1605,7 +1605,7 @@ class AvailabilitySync {
       const seriesId = is4k ? ratingKey4k : ratingKey;
 
       if (seriesId) {
-        const cacheKey = `${seriesId}-${seasonMeta.Id}`;
+        const cacheKey = `${is4k ? '4k' : 'std'}-${seriesId}-${seasonMeta.Id}`;
 
         if (cacheKey in this.jellyfinEpisodeExistsCache) {
           seasonExistsInJellyfin = this.jellyfinEpisodeExistsCache[cacheKey];
