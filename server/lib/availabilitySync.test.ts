@@ -2592,7 +2592,6 @@ describe('AvailabilitySync', () => {
           return [fakePlexSeason(1, 'plex-ep-file-s1-rk')];
         }
         if (key === 'plex-ep-file-s1-rk') {
-          // Only E1 in Plex so Sonarr's hasFile:false for E2 wins in the union.
           return fakePlexEpisodes(1);
         }
         return [];
@@ -2651,13 +2650,251 @@ describe('AvailabilitySync', () => {
         order: { episodeNumber: 'ASC' },
       });
 
-      assert.strictEqual(episodes.length, 3);
+      assert.strictEqual(episodes.length, 2);
       assert.strictEqual(episodes[0]?.episodeNumber, 1);
       assert.strictEqual(episodes[0]?.status, MediaStatus.AVAILABLE);
       assert.strictEqual(episodes[1]?.episodeNumber, 2);
       assert.strictEqual(episodes[1]?.status, MediaStatus.DELETED);
-      assert.strictEqual(episodes[2]?.episodeNumber, 3);
-      assert.strictEqual(episodes[2]?.status, MediaStatus.DELETED);
+    });
+
+    it('should keep an episode AVAILABLE when Sonarr lacks the file but Plex has it', async () => {
+      configurePlex();
+      configureSonarr([{ syncEnabled: true }]);
+      enableEpisodeTracking();
+
+      const mediaRepository = getRepository(Media);
+      const episodeRepository = getRepository(Episode);
+
+      const media = new Media();
+      media.tmdbId = 4104;
+      media.mediaType = MediaType.TV;
+      media.status = MediaStatus.AVAILABLE;
+      media.ratingKey = 'plex-ep-union-rk';
+      media.externalServiceId = 414;
+      media.seasons = [
+        new Season({
+          seasonNumber: 1,
+          status: MediaStatus.AVAILABLE,
+          status4k: MediaStatus.UNKNOWN,
+        }),
+      ];
+
+      const saved = await mediaRepository.save(media);
+      const season1 = saved.seasons.find((season) => season.seasonNumber === 1);
+      assert.ok(season1);
+
+      await episodeRepository.save([
+        new Episode({
+          episodeNumber: 1,
+          status: MediaStatus.AVAILABLE,
+          status4k: MediaStatus.UNKNOWN,
+          season: Promise.resolve(season1),
+        }),
+        new Episode({
+          episodeNumber: 2,
+          status: MediaStatus.AVAILABLE,
+          status4k: MediaStatus.UNKNOWN,
+          season: Promise.resolve(season1),
+        }),
+      ]);
+
+      getTvShowImpl = async () =>
+        fakeTmdbShow(4104, [
+          {
+            id: 1,
+            air_date: '2024-01-01',
+            episode_count: 2,
+            name: 'Season 1',
+            overview: '',
+            season_number: 1,
+          },
+        ]);
+
+      getMetadataImpl = async (key: string) => {
+        if (key === 'plex-ep-union-rk') {
+          return fakePlexShow('plex-ep-union-rk');
+        }
+        throw new Error('404');
+      };
+
+      getChildrenMetadataImpl = async (key: string) => {
+        if (key === 'plex-ep-union-rk') {
+          return [fakePlexSeason(1, 'plex-ep-union-s1-rk')];
+        }
+        if (key === 'plex-ep-union-s1-rk') {
+          return fakePlexEpisodes(2);
+        }
+        return [];
+      };
+
+      getSeriesByIdImpl = async (id: number) => {
+        if (id === 414) {
+          return {
+            tvdbId: 4104,
+            id: 414,
+            title: 'Test Show',
+            titleSlug: 'test-show',
+            monitored: true,
+            statistics: {
+              episodeFileCount: 1,
+              totalEpisodeCount: 2,
+              episodeCount: 2,
+              percentOfEpisodes: 50,
+              sizeOnDisk: 0,
+              seasonCount: 1,
+            },
+            seasons: fakeSonarrSeasons(1, { 1: 1 }),
+          } as unknown as SonarrSeries;
+        }
+        throw new Error('404');
+      };
+
+      getSonarrEpisodesImpl = async () =>
+        [
+          {
+            seriesId: 414,
+            seasonNumber: 1,
+            episodeNumber: 1,
+            hasFile: true,
+          },
+          {
+            seriesId: 414,
+            seasonNumber: 1,
+            episodeNumber: 2,
+            hasFile: false,
+          },
+        ] as EpisodeResult[];
+
+      await availabilitySync.run();
+
+      const episodes = await episodeRepository.find({
+        where: { season: { id: season1.id } },
+        order: { episodeNumber: 'ASC' },
+      });
+
+      assert.strictEqual(episodes.length, 2);
+      assert.strictEqual(episodes[0]?.status, MediaStatus.AVAILABLE);
+      assert.strictEqual(episodes[1]?.status, MediaStatus.AVAILABLE);
+    });
+
+    it('should not demote episodes when a Plex season fetch fails', async () => {
+      configurePlex();
+      configureSonarr([{ syncEnabled: true }]);
+      enableEpisodeTracking();
+
+      const mediaRepository = getRepository(Media);
+      const episodeRepository = getRepository(Episode);
+
+      const media = new Media();
+      media.tmdbId = 4105;
+      media.mediaType = MediaType.TV;
+      media.status = MediaStatus.AVAILABLE;
+      media.ratingKey = 'plex-ep-fail-rk';
+      media.externalServiceId = 415;
+      media.seasons = [
+        new Season({
+          seasonNumber: 1,
+          status: MediaStatus.AVAILABLE,
+          status4k: MediaStatus.UNKNOWN,
+        }),
+      ];
+
+      const saved = await mediaRepository.save(media);
+      const season1 = saved.seasons.find((season) => season.seasonNumber === 1);
+      assert.ok(season1);
+
+      await episodeRepository.save([
+        new Episode({
+          episodeNumber: 1,
+          status: MediaStatus.AVAILABLE,
+          status4k: MediaStatus.UNKNOWN,
+          season: Promise.resolve(season1),
+        }),
+        new Episode({
+          episodeNumber: 2,
+          status: MediaStatus.AVAILABLE,
+          status4k: MediaStatus.UNKNOWN,
+          season: Promise.resolve(season1),
+        }),
+      ]);
+
+      getTvShowImpl = async () =>
+        fakeTmdbShow(4105, [
+          {
+            id: 1,
+            air_date: '2024-01-01',
+            episode_count: 2,
+            name: 'Season 1',
+            overview: '',
+            season_number: 1,
+          },
+        ]);
+
+      getMetadataImpl = async (key: string) => {
+        if (key === 'plex-ep-fail-rk') {
+          return fakePlexShow('plex-ep-fail-rk');
+        }
+        throw new Error('404');
+      };
+
+      getChildrenMetadataImpl = async (key: string) => {
+        if (key === 'plex-ep-fail-rk') {
+          return [fakePlexSeason(1, 'plex-ep-fail-s1-rk')];
+        }
+        if (key === 'plex-ep-fail-s1-rk') {
+          throw new Error('Plex season fetch failed');
+        }
+        return [];
+      };
+
+      getSeriesByIdImpl = async (id: number) => {
+        if (id === 415) {
+          return {
+            tvdbId: 4105,
+            id: 415,
+            title: 'Test Show',
+            titleSlug: 'test-show',
+            monitored: true,
+            statistics: {
+              episodeFileCount: 0,
+              totalEpisodeCount: 2,
+              episodeCount: 2,
+              percentOfEpisodes: 0,
+              sizeOnDisk: 0,
+              seasonCount: 1,
+            },
+            seasons: fakeSonarrSeasons(1, { 1: 0 }),
+          } as unknown as SonarrSeries;
+        }
+        throw new Error('404');
+      };
+
+      getSonarrEpisodesImpl = async () =>
+        [
+          {
+            seriesId: 415,
+            seasonNumber: 1,
+            episodeNumber: 1,
+            hasFile: false,
+          },
+          {
+            seriesId: 415,
+            seasonNumber: 1,
+            episodeNumber: 2,
+            hasFile: false,
+          },
+        ] as EpisodeResult[];
+
+      await availabilitySync.run();
+
+      const episodes = await episodeRepository.find({
+        where: { season: { id: season1.id } },
+        order: { episodeNumber: 'ASC' },
+      });
+
+      assert.strictEqual(episodes.length, 2);
+      assert.strictEqual(episodes[0]?.status, MediaStatus.AVAILABLE);
+      assert.strictEqual(episodes[1]?.status, MediaStatus.AVAILABLE);
     });
 
     it('should still mark Sonarr episodes DELETED when TMDB show lookup fails', async () => {
@@ -2851,10 +3088,9 @@ describe('AvailabilitySync', () => {
         order: { episodeNumber: 'ASC' },
       });
 
-      assert.strictEqual(episodes.length, 3);
+      assert.strictEqual(episodes.length, 2);
       assert.strictEqual(episodes[0].status, MediaStatus.AVAILABLE);
       assert.strictEqual(episodes[1].status, MediaStatus.AVAILABLE);
-      assert.strictEqual(episodes[2].status, MediaStatus.DELETED);
     });
 
     it('marks stale 4K Plex episode status when only a standard file remains', async () => {
@@ -2993,9 +3229,8 @@ describe('AvailabilitySync', () => {
         order: { episodeNumber: 'ASC' },
       });
 
-      assert.strictEqual(episodes.length, 2);
+      assert.strictEqual(episodes.length, 1);
       assert.strictEqual(episodes[0].status, MediaStatus.AVAILABLE);
-      assert.strictEqual(episodes[1].status, MediaStatus.DELETED);
     });
 
     it('marks stale 4K Jellyfin episode status when only a standard file remains', async () => {
@@ -3138,8 +3373,71 @@ describe('AvailabilitySync', () => {
         order: { episodeNumber: 'ASC' },
       });
 
+      assert.strictEqual(episodes.length, 2);
       assert.strictEqual(episodes[0].status, MediaStatus.AVAILABLE);
       assert.strictEqual(episodes[1].status, MediaStatus.AVAILABLE);
+    });
+  });
+
+  describe('regression: episode tracking disabled', () => {
+    it('keeps Jellyfin 4K season availability when only standard files exist', async () => {
+      configureJellyfin();
+      configureSonarr([
+        { syncEnabled: true },
+        { is4k: true, syncEnabled: true },
+      ]);
+      assert.strictEqual(getSettings().main.enableEpisodeAvailability, false);
+
+      const mediaRepository = getRepository(Media);
+      const media = new Media();
+      media.tmdbId = 9201;
+      media.mediaType = MediaType.TV;
+      media.status = MediaStatus.AVAILABLE;
+      media.status4k = MediaStatus.AVAILABLE;
+      media.jellyfinMediaId = 'jf-reg-show';
+      media.jellyfinMediaId4k = 'jf-reg-show-4k';
+      media.seasons = [
+        new Season({
+          seasonNumber: 1,
+          status: MediaStatus.AVAILABLE,
+          status4k: MediaStatus.AVAILABLE,
+        }),
+      ];
+      await mediaRepository.save(media);
+
+      getItemDataImpl = async (id: string) => {
+        if (id === 'jf-reg-show' || id === 'jf-reg-show-4k') {
+          return fakeJellyfinShow(id, '9201');
+        }
+        return undefined;
+      };
+      getSeasonsImpl = async (seriesID: string) => {
+        if (seriesID === 'jf-reg-show') {
+          return [fakeJellyfinSeason(1, 'jf-reg-s1')];
+        }
+        if (seriesID === 'jf-reg-show-4k') {
+          return [fakeJellyfinSeason(1, 'jf-reg-s1-4k')];
+        }
+        return [];
+      };
+      getEpisodesImpl = async (_seriesID: string, seasonID: string) => {
+        if (seasonID === 'jf-reg-s1' || seasonID === 'jf-reg-s1-4k') {
+          return [fakeJellyfinEpisode(1, [1920])];
+        }
+        return [];
+      };
+
+      await availabilitySync.run();
+
+      const updated = await mediaRepository.findOneOrFail({
+        where: { tmdbId: 9201 },
+        relations: ['seasons'],
+      });
+      const seasonOne = updated.seasons.find((s) => s.seasonNumber === 1);
+      assert.ok(seasonOne);
+      assert.strictEqual(seasonOne.status, MediaStatus.AVAILABLE);
+      assert.strictEqual(seasonOne.status4k, MediaStatus.AVAILABLE);
+      assert.strictEqual(updated.status4k, MediaStatus.AVAILABLE);
     });
   });
 });
