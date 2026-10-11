@@ -1609,6 +1609,9 @@ class AvailabilitySync {
 
         if (cacheKey in this.jellyfinEpisodeExistsCache) {
           seasonExistsInJellyfin = this.jellyfinEpisodeExistsCache[cacheKey];
+          if (shouldTrackEpisodes) {
+            this.markEpisodePresenceFailed(season.id, is4k);
+          }
         } else {
           try {
             // Season metadata exists, but we need to verify it has actual

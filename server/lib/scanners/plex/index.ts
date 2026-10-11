@@ -350,29 +350,29 @@ class PlexScanner
 
         for (const episode of episodes) {
           const versions = episode.Media ?? [];
-          const hasStandard = this.enable4kShow
-            ? versions.some((media) => media.videoResolution !== '4k')
-            : true;
-          const has4k =
+          const hasStandardFile = versions.some((media) =>
+            this.enable4kShow ? media.videoResolution !== '4k' : true
+          );
+          const has4kFile =
             this.enable4kShow &&
             versions.some((media) => media.videoResolution === '4k');
 
-          if (hasStandard) {
+          if (!this.enable4kShow || hasStandardFile) {
             totalStandard += 1;
           }
-          if (has4k) {
+          if (has4kFile) {
             total4k += 1;
           }
 
           if (
             episodeDetails &&
             episode.index != null &&
-            (hasStandard || has4k)
+            (hasStandardFile || has4kFile)
           ) {
             episodeDetails.push({
               episodeNumber: episode.index,
-              hasFile: hasStandard,
-              hasFile4k: has4k,
+              hasFile: hasStandardFile,
+              hasFile4k: has4kFile,
             });
           }
         }

@@ -3309,6 +3309,146 @@ describe('AvailabilitySync', () => {
       assert.strictEqual(seasonOne.status4k, MediaStatus.DELETED);
     });
 
+    it('does not let Sonarr demote a tier skipped by a Jellyfin episode cache hit', async () => {
+      configureJellyfin();
+      configureSonarr([
+        { syncEnabled: true },
+        { is4k: true, syncEnabled: true },
+      ]);
+      const settings = getSettings();
+      settings.main.enableEpisodeAvailability = true;
+      settings.metadataSettings = {
+        tv: MetadataProviderType.TVDB,
+        anime: MetadataProviderType.TMDB,
+      };
+
+      const mediaRepository = getRepository(Media);
+      const episodeRepository = getRepository(Episode);
+
+      const season = new Season({
+        seasonNumber: 1,
+        status: MediaStatus.AVAILABLE,
+        status4k: MediaStatus.AVAILABLE,
+      });
+      season.episodes = [
+        new Episode({
+          episodeNumber: 1,
+          status: MediaStatus.AVAILABLE,
+          status4k: MediaStatus.AVAILABLE,
+        }),
+      ];
+
+      const media = new Media();
+      media.tmdbId = 9107;
+      media.mediaType = MediaType.TV;
+      media.status = MediaStatus.AVAILABLE;
+      media.status4k = MediaStatus.AVAILABLE;
+      // Same series id for both tiers so the 4K pass hits the episode cache.
+      media.jellyfinMediaId = 'jf-cache-hit-show';
+      media.jellyfinMediaId4k = 'jf-cache-hit-show';
+      media.externalServiceId = 417;
+      media.externalServiceId4k = 418;
+      media.seasons = [season];
+      await mediaRepository.save(media);
+
+      getTvShowImpl = async () =>
+        fakeTmdbShow(9107, [
+          {
+            id: 1,
+            air_date: '2024-01-01',
+            episode_count: 1,
+            name: 'Season 1',
+            overview: '',
+            season_number: 1,
+          },
+        ]);
+
+      getItemDataImpl = async (id: string) => {
+        if (id === 'jf-cache-hit-show') {
+          return fakeJellyfinShow(id, '9107');
+        }
+        return undefined;
+      };
+      getSeasonsImpl = async (seriesID: string) => {
+        if (seriesID === 'jf-cache-hit-show') {
+          return [fakeJellyfinSeason(1, 'jf-cache-hit-s1')];
+        }
+        return [];
+      };
+      getEpisodesImpl = async (_seriesID: string, seasonID: string) => {
+        if (seasonID === 'jf-cache-hit-s1') {
+          return [fakeJellyfinEpisode(1, [1920, 3840])];
+        }
+        return [];
+      };
+
+      getSeriesByIdImpl = async (id: number) => {
+        if (id === 417 || id === 418) {
+          return {
+            tvdbId: 9107,
+            id,
+            title: 'Test Show',
+            titleSlug: 'test-show',
+            monitored: true,
+            statistics: {
+              episodeFileCount: id === 417 ? 1 : 1,
+              totalEpisodeCount: id === 417 ? 1 : 2,
+              episodeCount: id === 417 ? 1 : 2,
+              percentOfEpisodes: id === 417 ? 100 : 50,
+              sizeOnDisk: 0,
+              seasonCount: 1,
+            },
+            seasons: fakeSonarrSeasons(1, { 1: 1 }),
+          } as unknown as SonarrSeries;
+        }
+        throw new Error('404');
+      };
+
+      getSonarrEpisodesImpl = async (seriesId?: number) => {
+        if (seriesId === 418) {
+          return [
+            {
+              seriesId: 418,
+              seasonNumber: 1,
+              episodeNumber: 1,
+              hasFile: false,
+            },
+            {
+              seriesId: 418,
+              seasonNumber: 1,
+              episodeNumber: 2,
+              hasFile: true,
+            },
+          ] as EpisodeResult[];
+        }
+        return [
+          {
+            seriesId: 417,
+            seasonNumber: 1,
+            episodeNumber: 1,
+            hasFile: true,
+          },
+        ] as EpisodeResult[];
+      };
+
+      await availabilitySync.run();
+
+      const savedSeason = await mediaRepository.findOneOrFail({
+        where: { tmdbId: 9107 },
+        relations: ['seasons'],
+      });
+      const seasonOne = savedSeason.seasons.find((s) => s.seasonNumber === 1);
+      assert.ok(seasonOne);
+
+      const episodes = await episodeRepository.find({
+        where: { season: { id: seasonOne.id } },
+      });
+
+      assert.strictEqual(episodes.length, 1);
+      assert.strictEqual(episodes[0].status, MediaStatus.AVAILABLE);
+      assert.strictEqual(episodes[0].status4k, MediaStatus.AVAILABLE);
+    });
+
     it('does not unmark Plex episodes when tracking is disabled', async () => {
       configurePlex();
       getSettings().sonarr = [];
