@@ -1,6 +1,6 @@
 {
   "name": "jellyseerr",
-  "version": "2.7.3",
+  "version": "2.7.3-deprecated",
   "private": true,
   "scripts": {
     "preinstall": "npx only-allow pnpm",

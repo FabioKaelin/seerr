@@ -1,3 +1,4 @@
+import DeprecationNotice from '@app/components/DeprecationNotice';
 import Layout from '@app/components/Layout';
 import LoadingBar from '@app/components/LoadingBar';
 import PWAHeader from '@app/components/PWAHeader';
@@ -212,6 +213,7 @@ const CoreApp: Omit<NextAppComponentType, 'origGetInitialProps'> = ({
                   />
                 </Head>
                 <StatusChecker />
+                <DeprecationNotice />
                 <ServiceWorkerSetup />
                 <UserContext initialUser={user}>{component}</UserContext>
               </ToastProvider>
