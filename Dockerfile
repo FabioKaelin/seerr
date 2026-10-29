@@ -5,7 +5,7 @@ ENV TARGETPLATFORM=${TARGETPLATFORM:-linux/amd64}
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
+RUN apk upgrade --no-cache && corepack enable
 
 COPY . ./app
 WORKDIR /app
@@ -56,7 +56,7 @@ ARG COMMIT_TAG
 ENV NODE_ENV=production
 ENV COMMIT_TAG=${COMMIT_TAG}
 
-RUN apk add --no-cache tzdata
+RUN apk upgrade --no-cache && apk add --no-cache tzdata
 
 USER node:node
 
